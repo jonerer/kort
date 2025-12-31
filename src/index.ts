@@ -3,7 +3,7 @@
  */
 export interface Environment {
   name: string;
-  variables?: Record<string, string>;
+  helmReleases: HelmRelease[];
 }
 
 /**
@@ -25,10 +25,12 @@ export interface Config {
 /**
  * Release information interface
  */
-export interface Release {
+export interface HelmRelease {
+  name: string;
+  namespace: string;
+  chart: string;
   version: string;
-  date?: string;
-  notes?: string;
+  valuesObject?: Record<string, unknown>;
 }
 
 /**
@@ -67,11 +69,11 @@ export class KortProcessor {
  */
 export function render(context: KortContext): void {
   console.log(`Root directory: ${context.rootDir}`);
-  console.log('Environments:');
+  console.log("Environments:");
   context.environments.forEach((env) => {
     console.log(`  - ${env.name}`);
     if (env.variables) {
-      console.log('    Variables:', env.variables);
+      console.log("    Variables:", env.variables);
     }
   });
 }
