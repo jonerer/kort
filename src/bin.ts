@@ -15,7 +15,8 @@ function main(): void {
   }
 
   const message: string = args[0];
-  const count: number = args[1] ? parseInt(args[1], 10) : 1;
+  const countArg: number = args[1] ? parseInt(args[1], 10) : 1;
+  const count: number = isNaN(countArg) ? 1 : countArg;
 
   const result: string = kort({ message, count });
   console.log(result);
