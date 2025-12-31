@@ -1,4 +1,29 @@
 /**
+ * Environment configuration interface
+ */
+export interface Environment {
+  name: string;
+  variables?: Record<string, string>;
+}
+
+/**
+ * Configuration interface
+ */
+export interface Config {
+  environment: string;
+  options?: Record<string, unknown>;
+}
+
+/**
+ * Release information interface
+ */
+export interface Release {
+  version: string;
+  date?: string;
+  notes?: string;
+}
+
+/**
  * Example interface to demonstrate TypeScript types
  */
 export interface KortOptions {
