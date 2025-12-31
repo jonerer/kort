@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { render, KortContext, RenderedState } from "./index.js";
 import { execa } from "execa";
 
@@ -9,7 +10,7 @@ vi.mock("execa", () => ({
   execa: vi.fn().mockResolvedValue({ stdout: "mocked output", stderr: "" }),
 }));
 
-const TEST_DIR = "/tmp/kort-test";
+const TEST_DIR = join(tmpdir(), "kort-test");
 
 describe("render function", () => {
   beforeEach(async () => {

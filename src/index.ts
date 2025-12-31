@@ -5,11 +5,17 @@ import { execa } from "execa";
 import { userInfo } from "node:os";
 
 /**
+ * Check if running in CI mode
+ */
+function isCI(): boolean {
+  return process.env.CI === "true" || process.env.CI === "1";
+}
+
+/**
  * Get the current user or "CI" if running in CI
  */
 function getCurrentUser(): string {
-  const isCI = process.env.CI === "true" || process.env.CI === "1";
-  if (isCI) {
+  if (isCI()) {
     return "CI";
   }
   try {
@@ -215,8 +221,7 @@ function needsRendering(
   }
 
   // Check if running in CI and renderedBy is not CI
-  const isCI = process.env.CI === "true" || process.env.CI === "1";
-  if (isCI && renderedRelease.renderedBy !== "CI") {
+  if (isCI() && renderedRelease.renderedBy !== "CI") {
     return "Running in CI but previously rendered by user";
   }
 
