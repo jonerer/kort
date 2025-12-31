@@ -19,7 +19,8 @@
   },
   "scripts": {
     "example": "tsx example/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest",
+    "test:run": "vitest run",
     "version": "git add -A",
     "postversion": "git push && git push --tags",
     "release:patch": "yarn version --patch",
@@ -33,7 +34,8 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "vitest": "^4.0.16"
   },
   "dependencies": {
     "execa": "^9.6.1"
