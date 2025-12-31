@@ -61,6 +61,27 @@ export interface HelmRelease {
 }
 
 /**
+ * Re-rendering reason codes
+ */
+export enum RenderReasonCode {
+  NO_CHANGE = 0,
+  NEW_RELEASE = 1,
+  SOURCE_CHANGED = 2,
+  TARGET_CHANGED = 3,
+  VALUES_CHANGED = 4,
+  CI_USER_MISMATCH = 5,
+}
+
+/**
+ * Result of checking if a release needs rendering
+ */
+export interface RenderCheckResult {
+  code: RenderReasonCode;
+  message: string;
+  needsRendering: boolean;
+}
+
+/**
  * Rendered release information interface
  */
 export interface RenderedRelease {
@@ -131,32 +152,10 @@ function calculateTargetChecksum(namespace: string, name: string): string {
 }
 
 /**
- * Sort object keys recursively for deterministic JSON serialization
- */
-function sortObjectKeys(obj: unknown): unknown {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(sortObjectKeys);
-  }
-  if (typeof obj === "object") {
-    const sorted: Record<string, unknown> = {};
-    const keys = Object.keys(obj as Record<string, unknown>).sort();
-    for (const key of keys) {
-      sorted[key] = sortObjectKeys((obj as Record<string, unknown>)[key]);
-    }
-    return sorted;
-  }
-  return obj;
-}
-
-/**
  * Calculate values checksum from values object
  */
 function calculateValuesChecksum(valuesObject?: Record<string, unknown>): string {
-  const sorted = sortObjectKeys(valuesObject || {});
-  const valuesJson = JSON.stringify(sorted);
+  const valuesJson = JSON.stringify(valuesObject || {});
   return calculateChecksum(valuesJson);
 }
 
@@ -194,14 +193,18 @@ function findRenderedRelease(
 
 /**
  * Check if a release needs to be rendered
- * Returns the reason for re-rendering, or null if no rendering is needed
+ * Returns an object with the reason code, message, and whether rendering is needed
  */
 function needsRendering(
   release: HelmRelease,
   renderedRelease?: RenderedRelease
-): string | null {
+): RenderCheckResult {
   if (!renderedRelease) {
-    return "New release (not previously rendered)";
+    return {
+      code: RenderReasonCode.NEW_RELEASE,
+      message: "New release (not previously rendered)",
+      needsRendering: true,
+    };
   }
 
   const sourceChecksum = calculateSourceChecksum(release.chart, release.version);
@@ -209,23 +212,43 @@ function needsRendering(
   const valuesChecksum = calculateValuesChecksum(release.valuesObject);
 
   if (renderedRelease.sourceChecksum !== sourceChecksum) {
-    return "Source changed (chart or version modified)";
+    return {
+      code: RenderReasonCode.SOURCE_CHANGED,
+      message: "Source changed (chart or version modified)",
+      needsRendering: true,
+    };
   }
   
   if (renderedRelease.targetChecksum !== targetChecksum) {
-    return "Target changed (namespace or name modified)";
+    return {
+      code: RenderReasonCode.TARGET_CHANGED,
+      message: "Target changed (namespace or name modified)",
+      needsRendering: true,
+    };
   }
   
   if (renderedRelease.valuesChecksum !== valuesChecksum) {
-    return "Values changed";
+    return {
+      code: RenderReasonCode.VALUES_CHANGED,
+      message: "Values changed",
+      needsRendering: true,
+    };
   }
 
   // Check if running in CI and renderedBy is not CI
   if (isCI() && renderedRelease.renderedBy !== "CI") {
-    return "Running in CI but previously rendered by user";
+    return {
+      code: RenderReasonCode.CI_USER_MISMATCH,
+      message: "Running in CI but previously rendered by user",
+      needsRendering: true,
+    };
   }
 
-  return null;
+  return {
+    code: RenderReasonCode.NO_CHANGE,
+    message: "No changes detected",
+    needsRendering: false,
+  };
 }
 
 /**
@@ -275,7 +298,7 @@ export async function render(context: KortContext): Promise<void> {
   const state = await loadRenderedState(context.rootDir);
 
   // Plan: collect releases that need rendering
-  const plan: Array<{ release: HelmRelease; reason: string }> = [];
+  const plan: Array<{ release: HelmRelease; checkResult: RenderCheckResult }> = [];
 
   // Check each environment and each release
   for (const env of context.environments) {
@@ -284,10 +307,10 @@ export async function render(context: KortContext): Promise<void> {
     for (const release of env.helmReleases) {
       const renderedRelease = findRenderedRelease(state, release.name);
       
-      const reason = needsRendering(release, renderedRelease);
-      if (reason) {
-        console.log(`    Adding ${release.name} to render plan: ${reason}`);
-        plan.push({ release, reason });
+      const checkResult = needsRendering(release, renderedRelease);
+      if (checkResult.needsRendering) {
+        console.log(`    Adding ${release.name} to render plan: ${checkResult.message}`);
+        plan.push({ release, checkResult });
       } else {
         console.log(`    ${release.name} is up to date`);
       }
@@ -299,7 +322,7 @@ export async function render(context: KortContext): Promise<void> {
   
   for (const planItem of plan) {
     console.log(`\nRendering ${planItem.release.name}...`);
-    console.log(`  Reason: ${planItem.reason}`);
+    console.log(`  Reason: ${planItem.checkResult.message}`);
     const success = await renderRelease(planItem.release, context.rootDir);
     
     if (success) {
