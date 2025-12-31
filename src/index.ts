@@ -7,6 +7,14 @@ export interface Environment {
 }
 
 /**
+ * KortContext interface for render function
+ */
+export interface KortContext {
+  environments: Environment[];
+  rootDir: string;
+}
+
+/**
  * Configuration interface
  */
 export interface Config {
@@ -52,4 +60,18 @@ export class KortProcessor {
   process(): string {
     return kort(this.options);
   }
+}
+
+/**
+ * Render function that processes a KortContext
+ */
+export function render(context: KortContext): void {
+  console.log(`Root directory: ${context.rootDir}`);
+  console.log('Environments:');
+  context.environments.forEach((env) => {
+    console.log(`  - ${env.name}`);
+    if (env.variables) {
+      console.log('    Variables:', env.variables);
+    }
+  });
 }
