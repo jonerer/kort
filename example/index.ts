@@ -35,4 +35,4 @@ const context: KortContext = {
 };
 
 // Call the render function with the context
-render(context);
+await render(context);
