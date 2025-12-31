@@ -79,3 +79,35 @@ The library exports the following TypeScript types:
 ## License
 
 ISC
+
+## Publishing
+
+### For Maintainers
+
+This package uses automated publishing via GitHub Actions. To publish a new version:
+
+1. **Create a new version using npm scripts:**
+   ```bash
+   # For a patch release (1.0.0 -> 1.0.1)
+   npm run release:patch
+   
+   # For a minor release (1.0.0 -> 1.1.0)
+   npm run release:minor
+   
+   # For a major release (1.0.0 -> 2.0.0)
+   npm run release:major
+   ```
+
+2. **The script will automatically:**
+   - Bump the version in `package.json`
+   - Create a git commit
+   - Create a git tag (e.g., `v1.0.1`)
+   - Push the commit and tag to GitHub
+
+3. **GitHub Actions will then:**
+   - Detect the new tag
+   - Publish the package to npm automatically
+
+**Prerequisites:**
+- Set up an `NPM_TOKEN` secret in the repository settings
+- Ensure you have push permissions to the repository
