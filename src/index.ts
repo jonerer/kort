@@ -108,10 +108,32 @@ function calculateTargetChecksum(namespace: string, name: string): string {
 }
 
 /**
+ * Sort object keys recursively for deterministic JSON serialization
+ */
+function sortObjectKeys(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sortObjectKeys);
+  }
+  if (typeof obj === "object") {
+    const sorted: Record<string, unknown> = {};
+    const keys = Object.keys(obj as Record<string, unknown>).sort();
+    for (const key of keys) {
+      sorted[key] = sortObjectKeys((obj as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return obj;
+}
+
+/**
  * Calculate values checksum from values object
  */
 function calculateValuesChecksum(valuesObject?: Record<string, unknown>): string {
-  const valuesJson = JSON.stringify(valuesObject || {});
+  const sorted = sortObjectKeys(valuesObject || {});
+  const valuesJson = JSON.stringify(sorted);
   return calculateChecksum(valuesJson);
 }
 
@@ -195,6 +217,9 @@ async function renderRelease(release: HelmRelease, rootDir: string): Promise<boo
 
     const result = await execa("helm", args, { cwd: rootDir });
     console.log(result.stdout);
+    if (result.stderr) {
+      console.error(result.stderr);
+    }
     return true;
   } catch (error) {
     console.error(`Failed to render release ${release.name}:`, error);
