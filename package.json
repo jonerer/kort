@@ -21,9 +21,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "version": "git add -A",
     "postversion": "git push && git push --tags",
-    "release:patch": "npm version patch",
-    "release:minor": "npm version minor",
-    "release:major": "npm version major"
+    "release:patch": "yarn version --patch",
+    "release:minor": "yarn version --minor",
+    "release:major": "yarn version --major",
+    "publish": "yarn publish --access public"
   },
   "keywords": [
     "kort"
