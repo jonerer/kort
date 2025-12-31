@@ -1,0 +1,34 @@
+{
+  "name": "kort",
+  "version": "1.0.0",
+  "description": "A kort npm library",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "kort": "./src/bin.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "version": "git add -A",
+    "postversion": "git push && git push --tags",
+    "release:patch": "yarn version --patch",
+    "release:minor": "yarn version --minor",
+    "release:major": "yarn version --major",
+    "publish": "yarn publish --access public"
+  },
+  "keywords": [
+    "kort"
+  ],
+  "author": "",
+  "license": "ISC"
+}
