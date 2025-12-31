@@ -76,6 +76,23 @@ The library exports the following TypeScript types:
 - `KortOptions` - Options interface for the kort function
 - `KortProcessor` - Class for processing kort operations
 
+## Development
+
+### Running the Example
+
+To run the example code in the `example/` directory:
+
+```bash
+yarn example
+# or
+npm run example
+```
+
+Note: If you encounter an error about incompatible Node.js version when using yarn, you can use:
+```bash
+yarn --ignore-engines example
+```
+
 ## License
 
 ISC
