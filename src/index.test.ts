@@ -250,4 +250,50 @@ describe("render function", () => {
     // Verify execa was NOT called (no re-rendering happened)
     expect(execa).not.toHaveBeenCalled();
   });
+
+  it("should re-render when target folder is missing", async () => {
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+
+    // Remove the output folder
+    const outputFolder = join(TEST_DIR, "output", "test", "test-release");
+    await rm(outputFolder, { recursive: true, force: true });
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render - should detect missing folder and re-render
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+
+    // State should be identical (all checksums should match)
+    expect(state2.environments[0].sourceChecksum).toBe(state1.environments[0].sourceChecksum);
+    expect(state2.environments[0].targetChecksum).toBe(state1.environments[0].targetChecksum);
+    expect(state2.environments[0].valuesChecksum).toBe(state1.environments[0].valuesChecksum);
+    
+    // Verify execa WAS called (re-rendering happened)
+    expect(execa).toHaveBeenCalledTimes(1);
+  });
 });
