@@ -5,6 +5,11 @@ import { execa } from "execa";
 import { userInfo, tmpdir } from "node:os";
 
 /**
+ * Temporary directory prefix for kort operations
+ */
+const TEMP_DIR_PREFIX = "kort-";
+
+/**
  * Check if running in CI mode
  */
 function isCI(): boolean {
@@ -271,15 +276,15 @@ async function needsRendering(
  * Render a single release using helm template
  */
 async function renderRelease(
-  release: HelmRelease, 
-  rootDir: string, 
+  release: HelmRelease,
+  rootDir: string,
   envName: string
 ): Promise<boolean> {
   let tempDir: string | undefined;
   
   try {
     // Create a temporary directory
-    tempDir = await mkdtemp(join(tmpdir(), "kort-"));
+    tempDir = await mkdtemp(join(tmpdir(), TEMP_DIR_PREFIX));
 
     const args = [
       "template",
@@ -321,8 +326,8 @@ async function renderRelease(
       await rename(targetFolder, oldTarget);
       await rename(tempDir, targetFolder);
       // Clean up old target in background (best effort)
-      rm(oldTarget, { recursive: true, force: true }).catch(() => {
-        // Ignore cleanup errors
+      rm(oldTarget, { recursive: true, force: true }).catch((error) => {
+        console.error(`Warning: Failed to clean up old target folder ${oldTarget}:`, error);
       });
     } catch {
       // Target doesn't exist, just rename
