@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdtemp, rename, access, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rename, access, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { execa } from "execa";
 import { userInfo, tmpdir } from "node:os";
@@ -321,7 +321,9 @@ async function renderRelease(
       await rename(targetFolder, oldTarget);
       await rename(tempDir, targetFolder);
       // Clean up old target in background (best effort)
-      import("node:fs/promises").then(({ rm }) => rm(oldTarget, { recursive: true, force: true }));
+      rm(oldTarget, { recursive: true, force: true }).catch(() => {
+        // Ignore cleanup errors
+      });
     } catch {
       // Target doesn't exist, just rename
       await rename(tempDir, targetFolder);
@@ -337,7 +339,6 @@ async function renderRelease(
     // Clean up temp directory on error
     if (tempDir) {
       try {
-        const { rm } = await import("node:fs/promises");
         await rm(tempDir, { recursive: true, force: true });
       } catch {
         // Ignore cleanup errors
