@@ -178,6 +178,7 @@ async function calculateValuesChecksum(
       } catch (error) {
         // If file doesn't exist or can't be read, include the error in checksum
         // This ensures checksum changes if a file becomes unavailable
+        console.warn(`Warning: Could not read value file '${valueFile}': ${error}`);
         combinedData += `ERROR_READING_FILE:${valueFile}`;
       }
     }
