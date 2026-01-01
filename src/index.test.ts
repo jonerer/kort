@@ -326,7 +326,7 @@ metadata:
               name: "local-release",
               namespace: "test-ns",
               chart: `file://${chartPath}`,
-              version: "ignored", // Should be ignored for local charts
+              // No version field for local charts
             },
           ],
         },
@@ -381,7 +381,7 @@ data:
               name: "local-release",
               namespace: "test-ns",
               chart: `file://${chartPath}`,
-              version: "ignored",
+              // No version field for local charts
             },
           ],
         },
@@ -448,7 +448,7 @@ kind: ConfigMap`;
               name: "local-release",
               namespace: "test-ns",
               chart: `file://${chartPath}`,
-              version: "ignored",
+              // No version field for local charts
             },
           ],
         },

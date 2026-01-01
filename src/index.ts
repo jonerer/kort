@@ -55,15 +55,34 @@ export interface Config {
 }
 
 /**
- * Release information interface
+ * Base release information
  */
-export interface HelmRelease {
+interface BaseHelmRelease {
   name: string;
   namespace: string;
-  chart: string;
-  version: string;
   valuesObject?: Record<string, unknown>;
 }
+
+/**
+ * Remote Helm release (from a registry or repository)
+ */
+export interface RemoteHelmRelease extends BaseHelmRelease {
+  chart: string;
+  version: string;
+}
+
+/**
+ * Local Helm release (from local filesystem)
+ */
+export interface LocalHelmRelease extends BaseHelmRelease {
+  chart: `file://${string}`;
+  version?: never; // Version is not used for local charts
+}
+
+/**
+ * Release information - can be either a remote or local release
+ */
+export type HelmRelease = RemoteHelmRelease | LocalHelmRelease;
 
 /**
  * Re-rendering reason codes
@@ -224,7 +243,7 @@ async function calculateLocalChartChecksum(chartPath: string): Promise<string> {
 /**
  * Calculate source checksum from chart and version
  */
-async function calculateSourceChecksum(chart: string, version: string): Promise<string> {
+async function calculateSourceChecksum(chart: string, version?: string): Promise<string> {
   if (isLocalChart(chart)) {
     // For local charts, calculate checksum from the chart directory contents
     const localPath = getLocalChartPath(chart);
@@ -232,6 +251,9 @@ async function calculateSourceChecksum(chart: string, version: string): Promise<
   }
   
   // For remote charts, use chart:version
+  if (!version) {
+    throw new Error("Version is required for remote charts");
+  }
   return calculateChecksum(`${chart}:${version}`);
 }
 
@@ -320,7 +342,10 @@ async function needsRendering(
     };
   }
 
-  const sourceChecksum = await calculateSourceChecksum(release.chart, release.version);
+  const sourceChecksum = await calculateSourceChecksum(
+    release.chart, 
+    'version' in release ? release.version : undefined
+  );
   const targetChecksum = calculateTargetChecksum(release.namespace, release.name);
   const valuesChecksum = calculateValuesChecksum(release.valuesObject);
 
@@ -388,7 +413,7 @@ async function renderRelease(
     ];
 
     // Add version flag only for non-local charts
-    if (!isLocalChart(release.chart)) {
+    if (!isLocalChart(release.chart) && 'version' in release) {
       args.push("--version", release.version);
     }
 
@@ -504,7 +529,10 @@ export async function render(context: KortContext): Promise<void> {
       // Update the rendered state
       const renderedRelease: RenderedRelease = {
         releaseName: planItem.release.name,
-        sourceChecksum: await calculateSourceChecksum(planItem.release.chart, planItem.release.version),
+        sourceChecksum: await calculateSourceChecksum(
+          planItem.release.chart, 
+          'version' in planItem.release ? planItem.release.version : undefined
+        ),
         targetChecksum: calculateTargetChecksum(planItem.release.namespace, planItem.release.name),
         valuesChecksum: calculateValuesChecksum(planItem.release.valuesObject),
         renderedBy: getCurrentUser(),

@@ -26,7 +26,7 @@ const releases: HelmRelease[] = [
     name: "my-local-app",
     namespace: "default",
     chart: `file://${resolve(exampleDir, "charts/test-local-chart")}`,
-    version: "ignored-for-local-charts", // Version is ignored for local charts
+    // No version field for local charts
     valuesObject: {
       replicas: 2,
     },
