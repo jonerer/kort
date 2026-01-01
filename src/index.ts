@@ -378,10 +378,13 @@ async function renderRelease(
     // Create a temporary directory
     tempDir = await mkdtemp(join(tmpdir(), TEMP_DIR_PREFIX));
 
+    // For local charts, strip the file:// prefix before passing to helm
+    const chartPath = isLocalChart(release.chart) ? getLocalChartPath(release.chart) : release.chart;
+
     const args = [
       "template",
       release.name,
-      release.chart,
+      chartPath,
       "--namespace",
       release.namespace,
       "--output-dir",
