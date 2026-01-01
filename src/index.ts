@@ -63,6 +63,7 @@ export interface HelmRelease {
   chart: string;
   version: string;
   valuesObject?: Record<string, unknown>;
+  valueFiles?: string[];
 }
 
 /**
@@ -158,11 +159,32 @@ function calculateTargetChecksum(namespace: string, name: string): string {
 }
 
 /**
- * Calculate values checksum from values object
+ * Calculate values checksum from values object and value files
  */
-function calculateValuesChecksum(valuesObject?: Record<string, unknown>): string {
-  const valuesJson = JSON.stringify(valuesObject || {});
-  return calculateChecksum(valuesJson);
+async function calculateValuesChecksum(
+  rootDir: string,
+  valuesObject?: Record<string, unknown>,
+  valueFiles?: string[]
+): Promise<string> {
+  let combinedData = JSON.stringify(valuesObject || {});
+  
+  // Read and append content from all value files
+  if (valueFiles && valueFiles.length > 0) {
+    for (const valueFile of valueFiles) {
+      const filePath = join(rootDir, valueFile);
+      try {
+        const fileContent = await readFile(filePath, "utf-8");
+        combinedData += fileContent;
+      } catch (error) {
+        // If file doesn't exist or can't be read, include the error in checksum
+        // This ensures checksum changes if a file becomes unavailable
+        console.warn(`Warning: Could not read value file '${valueFile}': ${error}`);
+        combinedData += `ERROR_READING_FILE:${valueFile}`;
+      }
+    }
+  }
+  
+  return calculateChecksum(combinedData);
 }
 
 /**
@@ -237,7 +259,7 @@ async function needsRendering(
 
   const sourceChecksum = calculateSourceChecksum(release.chart, release.version);
   const targetChecksum = calculateTargetChecksum(release.namespace, release.name);
-  const valuesChecksum = calculateValuesChecksum(release.valuesObject);
+  const valuesChecksum = await calculateValuesChecksum(rootDir, release.valuesObject, release.valueFiles);
 
   if (renderedRelease.sourceChecksum !== sourceChecksum) {
     return {
@@ -311,6 +333,14 @@ async function renderRelease(
       for (const [key, value] of Object.entries(release.valuesObject)) {
         const jsonValue = JSON.stringify(value);
         args.push("--set-json", `${key}=${jsonValue}`);
+      }
+    }
+
+    // Add value files if they exist
+    if (release.valueFiles && release.valueFiles.length > 0) {
+      for (const valueFile of release.valueFiles) {
+        const filePath = join(rootDir, valueFile);
+        args.push("--values", filePath);
       }
     }
 
@@ -412,7 +442,7 @@ export async function render(context: KortContext): Promise<void> {
         releaseName: planItem.release.name,
         sourceChecksum: calculateSourceChecksum(planItem.release.chart, planItem.release.version),
         targetChecksum: calculateTargetChecksum(planItem.release.namespace, planItem.release.name),
-        valuesChecksum: calculateValuesChecksum(planItem.release.valuesObject),
+        valuesChecksum: await calculateValuesChecksum(context.rootDir, planItem.release.valuesObject, planItem.release.valueFiles),
         renderedBy: getCurrentUser(),
       };
 

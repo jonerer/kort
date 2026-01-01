@@ -14,6 +14,7 @@ const releases: HelmRelease[] = [
     namespace: "cert-manager",
     chart: "oci://quay.io/jetstack/charts/cert-manager",
     version: "v1.19.2",
+    valueFiles: ["./values/cert-manager/staging.yaml"],
     valuesObject: {
       crds: {
         enabled: true,
