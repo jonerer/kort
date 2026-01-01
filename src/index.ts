@@ -198,6 +198,13 @@ function findRenderedRelease(
 }
 
 /**
+ * Get the target folder path for a release
+ */
+function getTargetFolder(rootDir: string, envName: string, releaseName: string): string {
+  return join(rootDir, "output", envName, releaseName);
+}
+
+/**
  * Check if a release needs to be rendered
  * Returns an object with the reason code, message, and whether rendering is needed
  */
@@ -216,7 +223,7 @@ async function needsRendering(
   }
 
   // Check if target folder exists
-  const targetFolder = join(rootDir, "output", envName, release.name);
+  const targetFolder = getTargetFolder(rootDir, envName, release.name);
   try {
     await access(targetFolder);
   } catch {
@@ -276,10 +283,10 @@ async function needsRendering(
  * Render a single release using helm template
  */
 async function renderRelease(
-  release: HelmRelease,
-  rootDir: string,
-  envName: string
+  planItem: { release: HelmRelease; envName: string },
+  rootDir: string
 ): Promise<boolean> {
+  const { release, envName } = planItem;
   let tempDir: string | undefined;
   
   try {
@@ -313,27 +320,22 @@ async function renderRelease(
     }
 
     // If successful, move the folder to rootDir/output/<envName>/<releaseName>
-    const targetFolder = join(rootDir, "output", envName, release.name);
+    const targetFolder = getTargetFolder(rootDir, envName, release.name);
     
     // Create parent directory if it doesn't exist
     await mkdir(join(rootDir, "output", envName), { recursive: true });
     
-    // Remove existing target folder if it exists, then rename temp to target
+    // Remove existing target folder if it exists
     try {
       await access(targetFolder);
-      // Target exists, remove it first by renaming to a temp name then deleting
-      const oldTarget = `${targetFolder}.old`;
-      await rename(targetFolder, oldTarget);
-      await rename(tempDir, targetFolder);
-      // Clean up old target in background (best effort)
-      rm(oldTarget, { recursive: true, force: true }).catch((error) => {
-        console.error(`Warning: Failed to clean up old target folder ${oldTarget}:`, error);
-      });
+      // Target exists, delete it first
+      await rm(targetFolder, { recursive: true, force: true });
     } catch {
-      // Target doesn't exist, just rename
-      await rename(tempDir, targetFolder);
+      // Target doesn't exist, no need to delete
     }
     
+    // Move temp folder to target
+    await rename(tempDir, targetFolder);
     tempDir = undefined; // Successfully moved, don't clean up
     
     console.log(`Manifests written to ${targetFolder}`);
@@ -400,9 +402,8 @@ export async function render(context: KortContext): Promise<void> {
     console.log(`\nRendering ${planItem.release.name}...`);
     console.log(`  Reason: ${planItem.checkResult.message}`);
     const success = await renderRelease(
-      planItem.release, 
-      context.rootDir,
-      planItem.envName
+      planItem,
+      context.rootDir
     );
     
     if (success) {
