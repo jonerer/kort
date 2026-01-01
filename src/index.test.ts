@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFile, mkdir, rm } from "node:fs/promises";
+import { readFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { render, KortContext, RenderedState } from "./index.js";
@@ -293,6 +293,267 @@ describe("render function", () => {
     expect(state2.environments[0].targetChecksum).toBe(state1.environments[0].targetChecksum);
     expect(state2.environments[0].valuesChecksum).toBe(state1.environments[0].valuesChecksum);
     
+    // Verify execa WAS called (re-rendering happened)
+    expect(execa).toHaveBeenCalledTimes(1);
+  });
+
+  it("should include valueFiles in helm command", async () => {
+    // Create test value files
+    const valuesFile1 = join(TEST_DIR, "values1.yaml");
+    const valuesFile2 = join(TEST_DIR, "values2.yaml");
+    await writeFile(valuesFile1, "key1: value1\n", "utf-8");
+    await writeFile(valuesFile2, "key2: value2\n", "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valueFiles: ["values1.yaml", "values2.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    await render(context);
+
+    // Verify execa was called with --values flags
+    expect(execa).toHaveBeenCalledWith(
+      "helm",
+      expect.arrayContaining([
+        "--values",
+        valuesFile1,
+        "--values",
+        valuesFile2,
+      ]),
+      { cwd: TEST_DIR }
+    );
+  });
+
+  it("should detect changes in valueFiles content and re-render", async () => {
+    // Create test value file
+    const valuesFile = join(TEST_DIR, "values.yaml");
+    await writeFile(valuesFile, "key: value1\n", "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valueFiles: ["values.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+    const checksum1 = state1.environments[0].valuesChecksum;
+
+    // Change value file content
+    await writeFile(valuesFile, "key: value2\n", "utf-8");
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+    const checksum2 = state2.environments[0].valuesChecksum;
+
+    expect(checksum1).not.toBe(checksum2);
+    // Verify execa WAS called (re-rendering happened)
+    expect(execa).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not re-render when valueFiles content unchanged", async () => {
+    // Create test value file
+    const valuesFile = join(TEST_DIR, "values.yaml");
+    await writeFile(valuesFile, "key: value1\n", "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valueFiles: ["values.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render with same file content
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+
+    // State should be identical (all checksums should match)
+    expect(state2.environments[0].valuesChecksum).toBe(state1.environments[0].valuesChecksum);
+    
+    // Verify execa was NOT called (no re-rendering happened)
+    expect(execa).not.toHaveBeenCalled();
+  });
+
+  it("should re-render when valueFiles list changes", async () => {
+    // Create test value files
+    const valuesFile1 = join(TEST_DIR, "values1.yaml");
+    const valuesFile2 = join(TEST_DIR, "values2.yaml");
+    await writeFile(valuesFile1, "key1: value1\n", "utf-8");
+    await writeFile(valuesFile2, "key2: value2\n", "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valueFiles: ["values1.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+    const checksum1 = state1.environments[0].valuesChecksum;
+
+    // Add another value file to the list
+    context.environments[0].helmReleases[0].valueFiles = ["values1.yaml", "values2.yaml"];
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+    const checksum2 = state2.environments[0].valuesChecksum;
+
+    expect(checksum1).not.toBe(checksum2);
+    // Verify execa WAS called (re-rendering happened)
+    expect(execa).toHaveBeenCalledTimes(1);
+  });
+
+  it("should handle missing valueFiles gracefully", async () => {
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valueFiles: ["nonexistent.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render - should work even with missing file
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+    
+    expect(state1.environments).toHaveLength(1);
+    expect(state1.environments[0].valuesChecksum).toBeDefined();
+  });
+
+  it("should combine valuesObject and valueFiles in checksum", async () => {
+    // Create test value file
+    const valuesFile = join(TEST_DIR, "values.yaml");
+    await writeFile(valuesFile, "fileKey: fileValue\n", "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "test-release",
+              namespace: "test-ns",
+              chart: "test-chart",
+              version: "1.0.0",
+              valuesObject: { objKey: "objValue" },
+              valueFiles: ["values.yaml"],
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+    const checksum1 = state1.environments[0].valuesChecksum;
+
+    // Change valuesObject
+    context.environments[0].helmReleases[0].valuesObject = { objKey: "objValue2" };
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+    const checksum2 = state2.environments[0].valuesChecksum;
+
+    expect(checksum1).not.toBe(checksum2);
     // Verify execa WAS called (re-rendering happened)
     expect(execa).toHaveBeenCalledTimes(1);
   });
