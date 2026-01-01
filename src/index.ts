@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rename, access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { execa } from "execa";
-import { userInfo } from "node:os";
+import { userInfo, tmpdir } from "node:os";
 
 /**
  * Check if running in CI mode
@@ -70,6 +70,7 @@ export enum RenderReasonCode {
   TARGET_CHANGED = 3,
   VALUES_CHANGED = 4,
   CI_USER_MISMATCH = 5,
+  TARGET_MISSING = 6,
 }
 
 /**
@@ -195,14 +196,29 @@ function findRenderedRelease(
  * Check if a release needs to be rendered
  * Returns an object with the reason code, message, and whether rendering is needed
  */
-function needsRendering(
+async function needsRendering(
   release: HelmRelease,
+  rootDir: string,
+  envName: string,
   renderedRelease?: RenderedRelease
-): RenderCheckResult {
+): Promise<RenderCheckResult> {
   if (!renderedRelease) {
     return {
       code: RenderReasonCode.NEW_RELEASE,
       message: "New release (not previously rendered)",
+      needsRendering: true,
+    };
+  }
+
+  // Check if target folder exists
+  const targetFolder = join(rootDir, "output", envName, release.name);
+  try {
+    await access(targetFolder);
+  } catch {
+    // Folder doesn't exist
+    return {
+      code: RenderReasonCode.TARGET_MISSING,
+      message: "Target folder does not exist",
       needsRendering: true,
     };
   }
@@ -254,8 +270,17 @@ function needsRendering(
 /**
  * Render a single release using helm template
  */
-async function renderRelease(release: HelmRelease, rootDir: string): Promise<boolean> {
+async function renderRelease(
+  release: HelmRelease, 
+  rootDir: string, 
+  envName: string
+): Promise<boolean> {
+  let tempDir: string | undefined;
+  
   try {
+    // Create a temporary directory
+    tempDir = await mkdtemp(join(tmpdir(), "kort-"));
+
     const args = [
       "template",
       release.name,
@@ -264,6 +289,8 @@ async function renderRelease(release: HelmRelease, rootDir: string): Promise<boo
       release.version,
       "--namespace",
       release.namespace,
+      "--output-dir",
+      tempDir,
     ];
 
     // Add values using --set-json if valuesObject exists
@@ -276,13 +303,47 @@ async function renderRelease(release: HelmRelease, rootDir: string): Promise<boo
     }
 
     const result = await execa("helm", args, { cwd: rootDir });
-    console.log(result.stdout);
     if (result.stderr) {
       console.error(result.stderr);
     }
+
+    // If successful, move the folder to rootDir/output/<envName>/<releaseName>
+    const targetFolder = join(rootDir, "output", envName, release.name);
+    
+    // Create parent directory if it doesn't exist
+    await mkdir(join(rootDir, "output", envName), { recursive: true });
+    
+    // Remove existing target folder if it exists, then rename temp to target
+    try {
+      await access(targetFolder);
+      // Target exists, remove it first by renaming to a temp name then deleting
+      const oldTarget = `${targetFolder}.old`;
+      await rename(targetFolder, oldTarget);
+      await rename(tempDir, targetFolder);
+      // Clean up old target in background (best effort)
+      import("node:fs/promises").then(({ rm }) => rm(oldTarget, { recursive: true, force: true }));
+    } catch {
+      // Target doesn't exist, just rename
+      await rename(tempDir, targetFolder);
+    }
+    
+    tempDir = undefined; // Successfully moved, don't clean up
+    
+    console.log(`Manifests written to ${targetFolder}`);
     return true;
   } catch (error) {
     console.error(`Failed to render release ${release.name}:`, error);
+    
+    // Clean up temp directory on error
+    if (tempDir) {
+      try {
+        const { rm } = await import("node:fs/promises");
+        await rm(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    
     return false;
   }
 }
@@ -298,7 +359,11 @@ export async function render(context: KortContext): Promise<void> {
   const state = await loadRenderedState(context.rootDir);
 
   // Plan: collect releases that need rendering
-  const plan: Array<{ release: HelmRelease; checkResult: RenderCheckResult }> = [];
+  const plan: Array<{ 
+    release: HelmRelease; 
+    envName: string;
+    checkResult: RenderCheckResult;
+  }> = [];
 
   // Check each environment and each release
   for (const env of context.environments) {
@@ -307,10 +372,15 @@ export async function render(context: KortContext): Promise<void> {
     for (const release of env.helmReleases) {
       const renderedRelease = findRenderedRelease(state, release.name);
       
-      const checkResult = needsRendering(release, renderedRelease);
+      const checkResult = await needsRendering(
+        release, 
+        context.rootDir,
+        env.name,
+        renderedRelease
+      );
       if (checkResult.needsRendering) {
         console.log(`    Adding ${release.name} to render plan: ${checkResult.message}`);
-        plan.push({ release, checkResult });
+        plan.push({ release, envName: env.name, checkResult });
       } else {
         console.log(`    ${release.name} is up to date`);
       }
@@ -323,7 +393,11 @@ export async function render(context: KortContext): Promise<void> {
   for (const planItem of plan) {
     console.log(`\nRendering ${planItem.release.name}...`);
     console.log(`  Reason: ${planItem.checkResult.message}`);
-    const success = await renderRelease(planItem.release, context.rootDir);
+    const success = await renderRelease(
+      planItem.release, 
+      context.rootDir,
+      planItem.envName
+    );
     
     if (success) {
       // Update the rendered state
