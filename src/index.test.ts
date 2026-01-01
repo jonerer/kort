@@ -297,6 +297,187 @@ describe("render function", () => {
     expect(execa).toHaveBeenCalledTimes(1);
   });
 
+  it("should handle local charts with file:// prefix", async () => {
+    // Create a test chart directory
+    const chartPath = join(TEST_DIR, "test-chart");
+    await mkdir(chartPath, { recursive: true });
+    await mkdir(join(chartPath, "templates"), { recursive: true });
+
+    // Create Chart.yaml
+    const chartYaml = `apiVersion: v2
+name: test-chart
+version: 1.0.0
+description: A test chart`;
+    await writeFile(join(chartPath, "Chart.yaml"), chartYaml, "utf-8");
+
+    // Create a template file
+    const template = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config`;
+    await writeFile(join(chartPath, "templates", "configmap.yaml"), template, "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "local-release",
+              namespace: "test-ns",
+              chart: `file://${chartPath}`,
+              // No version field for local charts
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    await render(context);
+
+    const stateContent = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state: RenderedState = JSON.parse(stateContent);
+
+    expect(state.environments).toHaveLength(1);
+    expect(state.environments[0].releaseName).toBe("local-release");
+    expect(state.environments[0].sourceChecksum).toBeDefined();
+
+    // Verify that execa was called without --version flag
+    expect(execa).toHaveBeenCalledWith(
+      "helm",
+      expect.not.arrayContaining(["--version"]),
+      expect.any(Object)
+    );
+  });
+
+  it("should re-render local chart when template files change", async () => {
+    // Create a test chart directory
+    const chartPath = join(TEST_DIR, "test-chart");
+    await mkdir(chartPath, { recursive: true });
+    await mkdir(join(chartPath, "templates"), { recursive: true });
+
+    // Create Chart.yaml
+    const chartYaml = `apiVersion: v2
+name: test-chart
+version: 1.0.0`;
+    await writeFile(join(chartPath, "Chart.yaml"), chartYaml, "utf-8");
+
+    // Create a template file
+    const template1 = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+data:
+  key: value1`;
+    await writeFile(join(chartPath, "templates", "configmap.yaml"), template1, "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "local-release",
+              namespace: "test-ns",
+              chart: `file://${chartPath}`,
+              // No version field for local charts
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+    const checksum1 = state1.environments[0].sourceChecksum;
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Modify the template file
+    const template2 = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+data:
+  key: value2`;
+    await writeFile(join(chartPath, "templates", "configmap.yaml"), template2, "utf-8");
+
+    // Second render - should detect change
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+    const checksum2 = state2.environments[0].sourceChecksum;
+
+    // Checksums should be different
+    expect(checksum1).not.toBe(checksum2);
+    
+    // Verify execa WAS called (re-rendering happened)
+    expect(execa).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not re-render local chart when nothing changed", async () => {
+    // Create a test chart directory
+    const chartPath = join(TEST_DIR, "test-chart");
+    await mkdir(chartPath, { recursive: true });
+    await mkdir(join(chartPath, "templates"), { recursive: true });
+
+    // Create Chart.yaml
+    const chartYaml = `apiVersion: v2
+name: test-chart
+version: 1.0.0`;
+    await writeFile(join(chartPath, "Chart.yaml"), chartYaml, "utf-8");
+
+    // Create a template file
+    const template = `apiVersion: v1
+kind: ConfigMap`;
+    await writeFile(join(chartPath, "templates", "configmap.yaml"), template, "utf-8");
+
+    const context: KortContext = {
+      environments: [
+        {
+          name: "test",
+          helmReleases: [
+            {
+              name: "local-release",
+              namespace: "test-ns",
+              chart: `file://${chartPath}`,
+              // No version field for local charts
+            },
+          ],
+        },
+      ],
+      rootDir: TEST_DIR,
+    };
+
+    // First render
+    await render(context);
+
+    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state1: RenderedState = JSON.parse(state1Content);
+
+    // Clear mock call count
+    vi.clearAllMocks();
+
+    // Second render with no changes
+    await render(context);
+
+    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
+    const state2: RenderedState = JSON.parse(state2Content);
+
+    // Checksums should be identical
+    expect(state2.environments[0].sourceChecksum).toBe(state1.environments[0].sourceChecksum);
+    
+    // Verify execa was NOT called (no re-rendering happened)
+    expect(execa).not.toHaveBeenCalled();
+  });
+
   it("should include valueFiles in helm command", async () => {
     // Create test value files
     const valuesFile1 = join(TEST_DIR, "values1.yaml");
@@ -385,52 +566,7 @@ describe("render function", () => {
     expect(execa).toHaveBeenCalledTimes(1);
   });
 
-  it("should not re-render when valueFiles content unchanged", async () => {
-    // Create test value file
-    const valuesFile = join(TEST_DIR, "values.yaml");
-    await writeFile(valuesFile, "key: value1\n", "utf-8");
-
-    const context: KortContext = {
-      environments: [
-        {
-          name: "test",
-          helmReleases: [
-            {
-              name: "test-release",
-              namespace: "test-ns",
-              chart: "test-chart",
-              version: "1.0.0",
-              valueFiles: ["values.yaml"],
-            },
-          ],
-        },
-      ],
-      rootDir: TEST_DIR,
-    };
-
-    // First render
-    await render(context);
-
-    const state1Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
-    const state1: RenderedState = JSON.parse(state1Content);
-
-    // Clear mock call count
-    vi.clearAllMocks();
-
-    // Second render with same file content
-    await render(context);
-
-    const state2Content = await readFile(join(TEST_DIR, ".rendered.json"), "utf-8");
-    const state2: RenderedState = JSON.parse(state2Content);
-
-    // State should be identical (all checksums should match)
-    expect(state2.environments[0].valuesChecksum).toBe(state1.environments[0].valuesChecksum);
-    
-    // Verify execa was NOT called (no re-rendering happened)
-    expect(execa).not.toHaveBeenCalled();
-  });
-
-  it("should re-render when valueFiles list changes", async () => {
+  it("should detect changes when valueFiles list changes", async () => {
     // Create test value files
     const valuesFile1 = join(TEST_DIR, "values1.yaml");
     const valuesFile2 = join(TEST_DIR, "values2.yaml");

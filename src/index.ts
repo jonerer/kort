@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdtemp, rename, access, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rename, access, mkdir, rm, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { execa } from "execa";
 import { userInfo, tmpdir } from "node:os";
@@ -55,16 +55,35 @@ export interface Config {
 }
 
 /**
- * Release information interface
+ * Base release information
  */
-export interface HelmRelease {
+interface BaseHelmRelease {
   name: string;
   namespace: string;
-  chart: string;
-  version: string;
   valuesObject?: Record<string, unknown>;
   valueFiles?: string[];
 }
+
+/**
+ * Remote Helm release (from a registry or repository)
+ */
+export interface RemoteHelmRelease extends BaseHelmRelease {
+  chart: string;
+  version: string;
+}
+
+/**
+ * Local Helm release (from local filesystem)
+ */
+export interface LocalHelmRelease extends BaseHelmRelease {
+  chart: `file://${string}`;
+  version?: never; // Version is not used for local charts
+}
+
+/**
+ * Release information - can be either a remote or local release
+ */
+export type HelmRelease = RemoteHelmRelease | LocalHelmRelease;
 
 /**
  * Re-rendering reason codes
@@ -145,9 +164,97 @@ function calculateChecksum(data: string): string {
 }
 
 /**
+ * Check if a chart is a local chart (starts with file://)
+ */
+function isLocalChart(chart: string): boolean {
+  return chart.startsWith("file://");
+}
+
+/**
+ * Get the local path from a file:// URL
+ */
+function getLocalChartPath(chart: string): string {
+  return chart.substring(7); // Remove "file://" prefix
+}
+
+/**
+ * Recursively read all files in a directory and return their concatenated contents
+ */
+async function readDirectoryRecursive(dirPath: string): Promise<string> {
+  let contents = "";
+  
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    
+    // Sort entries for consistent ordering
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name);
+      
+      if (entry.isDirectory()) {
+        // Recursively read subdirectories
+        contents += await readDirectoryRecursive(fullPath);
+      } else if (entry.isFile()) {
+        // Read file contents
+        try {
+          const fileContent = await readFile(fullPath, "utf-8");
+          contents += `${fullPath}:${fileContent}\n`;
+        } catch (error) {
+          // Skip files that can't be read
+          console.warn(`Warning: Could not read file ${fullPath}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`Warning: Could not read directory ${dirPath}`);
+  }
+  
+  return contents;
+}
+
+/**
+ * Calculate checksum for a local chart by reading its templates and Chart.yaml
+ */
+async function calculateLocalChartChecksum(chartPath: string): Promise<string> {
+  let contents = "";
+  
+  // Read Chart.yaml
+  const chartYamlPath = join(chartPath, "Chart.yaml");
+  try {
+    const chartYaml = await readFile(chartYamlPath, "utf-8");
+    contents += `Chart.yaml:${chartYaml}\n`;
+  } catch (error) {
+    console.warn(`Warning: Could not read Chart.yaml at ${chartYamlPath}`);
+  }
+  
+  // Read all files in templates directory
+  const templatesPath = join(chartPath, "templates");
+  try {
+    await access(templatesPath);
+    const templatesContent = await readDirectoryRecursive(templatesPath);
+    contents += templatesContent;
+  } catch (error) {
+    console.warn(`Warning: Could not read templates directory at ${templatesPath}`);
+  }
+  
+  return calculateChecksum(contents);
+}
+
+/**
  * Calculate source checksum from chart and version
  */
-function calculateSourceChecksum(chart: string, version: string): string {
+async function calculateSourceChecksum(chart: string, version?: string): Promise<string> {
+  if (isLocalChart(chart)) {
+    // For local charts, calculate checksum from the chart directory contents
+    const localPath = getLocalChartPath(chart);
+    return await calculateLocalChartChecksum(localPath);
+  }
+  
+  // For remote charts, use chart:version
+  if (!version) {
+    throw new Error("Version is required for remote charts");
+  }
   return calculateChecksum(`${chart}:${version}`);
 }
 
@@ -257,7 +364,10 @@ async function needsRendering(
     };
   }
 
-  const sourceChecksum = calculateSourceChecksum(release.chart, release.version);
+  const sourceChecksum = await calculateSourceChecksum(
+    release.chart, 
+    isLocalChart(release.chart) ? undefined : release.version
+  );
   const targetChecksum = calculateTargetChecksum(release.namespace, release.name);
   const valuesChecksum = await calculateValuesChecksum(rootDir, release.valuesObject, release.valueFiles);
 
@@ -315,17 +425,26 @@ async function renderRelease(
     // Create a temporary directory
     tempDir = await mkdtemp(join(tmpdir(), TEMP_DIR_PREFIX));
 
+    // For local charts, strip the file:// prefix before passing to helm
+    const chartPath = isLocalChart(release.chart) ? getLocalChartPath(release.chart) : release.chart;
+
     const args = [
       "template",
       release.name,
-      release.chart,
-      "--version",
-      release.version,
+      chartPath,
+    ];
+
+    // Add version flag only for non-local charts
+    if (!isLocalChart(release.chart)) {
+      args.push("--version", release.version);
+    }
+
+    args.push(
       "--namespace",
       release.namespace,
       "--output-dir",
       tempDir,
-    ];
+    );
 
     // Add values using --set-json if valuesObject exists
     // Helm expects --set-json in the format: key=jsonValue
@@ -440,7 +559,10 @@ export async function render(context: KortContext): Promise<void> {
       // Update the rendered state
       const renderedRelease: RenderedRelease = {
         releaseName: planItem.release.name,
-        sourceChecksum: calculateSourceChecksum(planItem.release.chart, planItem.release.version),
+        sourceChecksum: await calculateSourceChecksum(
+          planItem.release.chart, 
+          isLocalChart(planItem.release.chart) ? undefined : planItem.release.version
+        ),
         targetChecksum: calculateTargetChecksum(planItem.release.namespace, planItem.release.name),
         valuesChecksum: await calculateValuesChecksum(context.rootDir, planItem.release.valuesObject, planItem.release.valueFiles),
         renderedBy: getCurrentUser(),
