@@ -7,4 +7,3 @@ coverage/
 package-lock.json
 .rendered.json
 example/charts/test-chart/
-output/
