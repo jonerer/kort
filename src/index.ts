@@ -344,7 +344,7 @@ async function needsRendering(
 
   const sourceChecksum = await calculateSourceChecksum(
     release.chart, 
-    'version' in release ? release.version : undefined
+    isLocalChart(release.chart) ? undefined : release.version
   );
   const targetChecksum = calculateTargetChecksum(release.namespace, release.name);
   const valuesChecksum = calculateValuesChecksum(release.valuesObject);
@@ -413,7 +413,7 @@ async function renderRelease(
     ];
 
     // Add version flag only for non-local charts
-    if (!isLocalChart(release.chart) && 'version' in release) {
+    if (!isLocalChart(release.chart)) {
       args.push("--version", release.version);
     }
 
@@ -531,7 +531,7 @@ export async function render(context: KortContext): Promise<void> {
         releaseName: planItem.release.name,
         sourceChecksum: await calculateSourceChecksum(
           planItem.release.chart, 
-          'version' in planItem.release ? planItem.release.version : undefined
+          isLocalChart(planItem.release.chart) ? undefined : planItem.release.version
         ),
         targetChecksum: calculateTargetChecksum(planItem.release.namespace, planItem.release.name),
         valuesChecksum: calculateValuesChecksum(planItem.release.valuesObject),
