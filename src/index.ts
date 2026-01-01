@@ -385,16 +385,19 @@ async function renderRelease(
       "template",
       release.name,
       chartPath,
-      "--namespace",
-      release.namespace,
-      "--output-dir",
-      tempDir,
     ];
 
     // Add version flag only for non-local charts
     if (!isLocalChart(release.chart)) {
-      args.splice(3, 0, "--version", release.version);
+      args.push("--version", release.version);
     }
+
+    args.push(
+      "--namespace",
+      release.namespace,
+      "--output-dir",
+      tempDir,
+    );
 
     // Add values using --set-json if valuesObject exists
     // Helm expects --set-json in the format: key=jsonValue

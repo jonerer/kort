@@ -45,9 +45,9 @@ const context: KortContext = {
   rootDir: exampleDir,
 };
 
-console.log("=" .repeat(80));
+console.log("=".repeat(80));
 console.log("Running kort with both remote and local charts");
-console.log("=" .repeat(80));
+console.log("=".repeat(80));
 
 // Call the render function with the context
 await render(context);
